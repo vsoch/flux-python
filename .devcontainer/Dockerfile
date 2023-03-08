@@ -12,7 +12,7 @@ ENV USER_GID=${USER_GID}
 
 # Pip not provided in this version
 RUN apt-get update
-COPY scripts/requirements-dev.txt /requirements.txt
+COPY .github/scripts/requirements-dev.txt /requirements.txt
 
 # For easier Python development.
 RUN apt-get update && \
