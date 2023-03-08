@@ -1,0 +1,8 @@
+__pycache__
+.deps
+build
+src/.libs
+src/*.c
+flux.egg-info
+.eggs
+_flux
