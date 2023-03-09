@@ -6,3 +6,4 @@ src/*.c
 flux.egg-info
 .eggs
 _flux
+dist

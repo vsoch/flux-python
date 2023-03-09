@@ -45,11 +45,11 @@ ffi.set_source(
         f"{root}/src/common/libutil",
     ],
     extra_compile_args=[
-        "-L/code/src/common/.libs",
-        "-L/code/src/common/libdebugged/.libs",
-        "-L/code/src/common/libidset/.libs",
-        "-L/code/src/common/libflux/.libs",
-        "-L/code/src/common/libutil/.libs",
+        f"-L{root}/src/common/.libs",
+        f"-L{root}/src/common/libdebugged/.libs",
+        f"-L{root}/src/common/libidset/.libs",
+        f"-L{root}/src/common/libflux/.libs",
+        f"-L{root}/src/common/libutil/.libs",
     ],
 )
 

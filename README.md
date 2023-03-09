@@ -12,23 +12,34 @@ the instructions in the DevContainer to build the Flux Python bindings.
 
 ### Building Modules
 
+We will need to build the tarball providing paths to the flux-core and flux-security
+sources. This can be improved upon to just be one path if all the dependencies
+are provided with the flux install (and we don't need the source):
 
-You can build:
 
 ```bash
-$ python3 setup.py build
+# Generate the wheel (requires pip install wheel)
+$ python3 setup.py sdist bdist_wheel --flux-root /home/vscode/flux-core --security-src /home/vscode/security --security-include /usr/local/include/flux/security
 ```
 
+You can then install the wheel (as a user or to the root)
+
+```bash
+$ pip install dist/flux-0.46.0-cp38-cp38-linux_x86_64.whl --user
+$ sudo pip install dist/flux-0.46.0-cp38-cp38-linux_x86_64.whl 
+```
+```console
+Processing ./dist/flux-0.46.0-cp38-cp38-linux_x86_64.whl
+Requirement already satisfied: cffi>=1.1 in /usr/lib/python3/dist-packages (from flux==0.46.0) (1.14.0)
+Installing collected packages: flux
+Successfully installed flux-0.46.0
+```
+
+If the development container you are using still installs the Python bindings, you'll want to do the sudo variant above to override.
 And then start a flux instance:
 
 ```bash
 $ flux start --test-size=4
-```
-
-And then cd into the build directory:
-
-```bash
-$ cd build/lib.linux-x86_64-3.8/
 ```
 
 And import flux.
@@ -43,8 +54,7 @@ flux.Flux()
 
 More coming soon! We still need to:
 
- - [ ] customize install to take paths to your install
  - [ ] some version checking
- - [ ] a complete build -> install workflow
+ - [ ] ability to build .tar.gz (needed flux deps to be removed)
 
 

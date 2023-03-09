@@ -9,10 +9,11 @@
 ###############################################################
 
 # Usage
-# This should work with setup.py and pip, and arguments are provided as follows:
-# python setup.py install --path=/path/to/flux
-# pip install --install-option="--path=/path/to/flux" .
+# This should only be used to generate a wheel, as the build will not be
+# portable to a system with different Flux / Flux Security paths.
 
+import argparse
+import copy
 import os
 import re
 import shutil
@@ -22,12 +23,11 @@ from contextlib import contextmanager
 
 from setuptools import find_packages
 from setuptools import setup as _setup
-from setuptools.command.install import install
-from setuptools.command.build_ext import build_ext
+from distutils.core import setup, Command
 
 # Metadata
 package_name = "flux"
-package_version = "0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.1"
+package_version = "0.46.0"
 package_description = "Bindings to the flux resource manager API"
 package_url = "https://github.com/flux-framework/flux-python"
 package_keywords = "flux, job manager, orchestration, hpc"
@@ -77,27 +77,10 @@ options = {
 # Global variables for build type, corresponds to
 build_types = {"core", "idset", "rlist", "security", "hostlist"}
 
-
-# Cut out early if not providing full detail about security
-def check_security_args():
-    """
-    Ensure --security is provided with --security-src and --security-include
-    """
-    if "--security" not in sys.argv:
-        return True
-    found = {}
-    for arg in sys.argv:
-        if not arg.startswith("--"):
-            continue
-        arg = arg.split("=")[0].strip()
-        found[arg] = True
-    return "--security-src" in found and "--security-include" in found
-
-
-if not check_security_args():
-    sys.exit(
-        "--security-include and --security-src are required when building security module."
-    )
+# Flux root (with source code) to install for
+flux_root = None
+security_src = None
+security_include = None
 
 
 @contextmanager
@@ -120,6 +103,16 @@ def read_file(filename):
     with open(filename, "r") as fd:
         data = fd.read()
     return data
+
+
+def set_envar(key, value):
+    """
+    Set an environment variable.
+
+    There isn't another good way to communicate with build modules.
+    """
+    os.putenv(key, value)
+    os.environ[key] = value
 
 
 def find_first(path, name, extra=None):
@@ -146,31 +139,13 @@ class PrepareFluxHeaders:
     a proper setup.py. We might eventually be able to separate them further.
     """
 
-    # TODO get this from somewhere else
-    def __init__(self):
-        self.flux_root = "/home/vscode/flux-core"
-        self.security_src = "/home/vscode/security"
-        self.security_include = "/usr/local/include/flux/security"
+    def __init__(self, root, security_src, security_include):
+        self.flux_root = root
+        self.security_src = security_src
+        self.security_include = security_include
         self.search = ""
         self.skip_build = False
         self.search = []
-        self.include_header = None
-
-        # Update envars to be seen by build modules
-        self.set_envar("FLUX_INSTALL_ROOT", self.flux_root)
-        if self.security_src:
-            self.set_envar("FLUX_SECURITY_SOURCE", self.security_src)
-        if self.security_include:
-            self.set_envar("FLUX_SECURITY_INCLUDE", self.security_include)
-
-    def set_envar(self, key, value):
-        """
-        Set an environment variable.
-
-        There isn't another good way to communicate with build modules.
-        """
-        os.putenv(key, value)
-        os.environ[key] = value
 
     def _parse_comma_list(self, attr):
         """
@@ -204,7 +179,6 @@ class PrepareFluxHeaders:
             cleaner = HeaderCleaner(
                 self.flux_root,
                 custom_search=self.search,
-                include_header=self.include_header,
                 build_type=build_type,
                 **options[build_type],
             )
@@ -212,7 +186,7 @@ class PrepareFluxHeaders:
 
 
 class HeaderCleaner:
-    def __init__(self, root, include_header, custom_search, build_type, **kwargs):
+    def __init__(self, root, custom_search, build_type, **kwargs):
         """
         Main class to run a clean!
         """
@@ -220,7 +194,6 @@ class HeaderCleaner:
             "flux_root",
             "search",
             "skip_build",
-            "include_header",
             "hostlist",
             "rlist",
             "idset",
@@ -231,7 +204,6 @@ class HeaderCleaner:
         self.root = root
         self.path = kwargs["path"].format(root=root)
         self.build_type = build_type
-        self.include_header = include_header
         self.preproc_output = os.path.join(here, "src", "_%s_preproc.h" % build_type)
         self.output = os.path.join(here, "src", "_%s_clean.h" % build_type)
 
@@ -275,12 +247,6 @@ class HeaderCleaner:
             # Process additional headers
             for header in self.additional_headers or []:
                 self.process_header(header)
-
-        # Note that this currently isn't used - should it passed to
-        # the build script?
-        include_head = self.header
-        if self.include_header:
-            include_head = self.include_header
 
         # Write the clean header!
         print(f"Writing stage 1 clean header to {self.output}")
@@ -366,15 +332,76 @@ class HeaderCleaner:
 
 
 # Setup.py logic goes here
+def get_parser():
+    parser = argparse.ArgumentParser(
+        description="Build Parser",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "--flux-root", dest="flux_root", help="Root to flux source code.", required=True
+    )
+    parser.add_argument(
+        "--security-src",
+        dest="security_src",
+        help="Security source code.",
+        required=True,
+    )
+    parser.add_argument(
+        "--security-include",
+        dest="security_include",
+        help="Security include path.",
+        required=True,
+    )
+    return parser
+
+
+def clean_args():
+    """
+    Ensure we remove extra flags that the second installed won't know about.
+    """
+    removed = ["--security-src", "--security-include", "--flux-root"]
+    cleaned = []
+    contenders = copy.deepcopy(sys.argv)
+    while contenders:
+        arg = contenders.pop(0)
+        if arg in removed:
+            contenders.pop(0)
+        else:
+            cleaned.append(arg)
+    sys.argv = cleaned
 
 
 def setup():
     """
     A wrapper to run setup. This likely isn't best practice, but is a first effort.
     """
-    # Custom setup commands, first without cffi to prepare headers
-    prepare = PrepareFluxHeaders()
-    prepare.run()
+    parser = get_parser()
+
+    # If an error occurs while parsing the arguments, the interpreter will exit with value 2
+    args, extra = parser.parse_known_args()
+
+    global flux_root
+    global security_src
+    global security_include
+
+    flux_root = args.flux_root
+    security_src = args.security_src
+    security_include = args.security_include
+
+    # Always set the install root to the environment
+    set_envar("FLUX_INSTALL_ROOT", flux_root)
+    set_envar("FLUX_SECURITY_SOURCE", security_src)
+    set_envar("FLUX_SECURITY_INCLUDE", security_include)
+
+    # Clean arguments we added
+    clean_args()
+
+    # We only want this to run on creating the tarball
+    command = sys.argv[1]
+    if command in ["sdist", "build", "build_ext"]:
+        # Custom setup commands, first without cffi to prepare headers
+        prepare = PrepareFluxHeaders(flux_root, security_src, security_include)
+        prepare.run()
 
     # Request to install additional modules (we always do core0
     # We also have to remove the setup.py flags that aren't known
